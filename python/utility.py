@@ -5,6 +5,7 @@ from datetime import *
 import urllib.request
 from argparse import ArgumentParser, RawTextHelpFormatter, ArgumentTypeError
 from enums import *
+import time
 
 def get_destination_dir(file_url, folder=None):
   store_directory = os.environ.get('STORE_DIRECTORY')
@@ -44,30 +45,47 @@ def download_file(base_path, file_name, date_range=None, folder=None):
   if not os.path.exists(base_path):
     Path(get_destination_dir(base_path)).mkdir(parents=True, exist_ok=True)
 
-  try:
-    download_url = get_download_url(download_path)
-    dl_file = urllib.request.urlopen(download_url)
-    length = dl_file.getheader('content-length')
-    if length:
-      length = int(length)
-      blocksize = max(4096,length//100)
+  retry_count = 0
+  max_retry = 10
+  while retry_count < max_retry:
+    try:
+      download_url = get_download_url(download_path)
+      dl_file = urllib.request.urlopen(download_url)
+      length = dl_file.getheader('content-length')
+      if length:
+        length = int(length)
+        blocksize = max(4096,length//100)
 
-    with open(save_path, 'wb') as out_file:
-      dl_progress = 0
-      print("\nFile Download: {}".format(save_path))
-      while True:
-        buf = dl_file.read(blocksize)   
-        if not buf:
+      with open(save_path, 'wb') as out_file:
+        dl_progress = 0
+        print("\nFile Download: {}".format(save_path))
+        while True:
+          buf = dl_file.read(blocksize)   
+          if not buf:
+            break
+          dl_progress += len(buf)
+          out_file.write(buf)
+          done = int(50 * dl_progress / length)
+          sys.stdout.write("\r[%s%s]" % ('#' * done, '.' * (50-done)) )    
+          sys.stdout.flush()
+      
+      break
+    except urllib.error.HTTPError as e:
+      if e.code == 404:
+        print(f"file not found, the url is {download_url}")
+        break
+      else:
+        print(f"An exception occurred: {e}, the url is {download_url}, will retry, retry count: {retry_count}")
+        retry_count += 1
+        if retry_count == max_retry:
           break
-        dl_progress += len(buf)
-        out_file.write(buf)
-        done = int(50 * dl_progress / length)
-        sys.stdout.write("\r[%s%s]" % ('#' * done, '.' * (50-done)) )    
-        sys.stdout.flush()
-
-  except urllib.error.HTTPError:
-    print("\nFile not found: {}".format(download_url))
-    pass
+        time.sleep(5 * 60)
+    except Exception as e:
+      print(f"An exception occurred: {e}, the url is {download_url}, will retry, retry count: {retry_count}")
+      retry_count += 1
+      if retry_count == max_retry:
+        break
+      time.sleep(5 * 60)
 
 def convert_to_date_object(d):
   year, month, day = [int(x) for x in d.split('-')]
